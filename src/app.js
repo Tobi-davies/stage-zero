@@ -4,7 +4,12 @@ import cors from "cors";
 
 const app = express(); //create an express app
 
-app.use(cors());
+// app.use(cors());
+app.use(
+  cors({
+    origin: "*",
+  }),
+);
 
 app.use(express.json());
 
