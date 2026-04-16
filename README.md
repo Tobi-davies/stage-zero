@@ -1,10 +1,10 @@
-# 🚀 HNG Stage 0 Backend Task
+# Stage 0 Backend Task
 
 ## API Integration & Data Processing (Gender Classification)
 
 ---
 
-## 📌 Overview
+## Overview
 
 This project is a backend API built with **Node.js and Express** that classifies a given name by gender using the **Genderize.io API**.
 
@@ -17,13 +17,13 @@ The API processes the raw response and returns a structured, enriched output inc
 👉 **Base URL:**
 
 ```
-https://your-deployed-url.com
+stage-zero-production.up.railway.app
 ```
 
 👉 **Endpoint:**
 
 ```
-GET /api/classify?name=John
+GET stage-zero-production.up.railway.app/api/classify?name=dami
 ```
 
 ---
@@ -162,41 +162,9 @@ npm install
 npm run dev
 ```
 
-### 4. Test API
 
-```
-http://localhost:8000/api/classify?name=John
-```
 
----
 
-## 🔐 Environment Variables
-
-No environment variables are required for this project.
-
----
-
-## 📊 Performance
-
-- Response time: **< 500ms** (excluding external API latency)
-- Supports multiple concurrent requests
-
----
-
-## 📌 Submission Details
-
-- GitHub Repository:
-  👉 https://github.com/your-username/your-repo
-
-- Live API:
-  👉 https://your-deployed-url.com/api/classify?name=John
-
----
-
-## 👨‍💻 Author
-
-**Your Name**
-Backend Developer
 
 ---
 
