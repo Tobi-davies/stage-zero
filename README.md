@@ -57,7 +57,7 @@ GET /api/classify
 ### Example Request
 
 ```
-GET /api/classify?name=John
+GET /api/classify?name=Dami
 ```
 
 ---
@@ -70,7 +70,7 @@ GET /api/classify?name=John
 {
   "status": "success",
   "data": {
-    "name": "john",
+    "name": "dami",
     "gender": "male",
     "probability": 0.99,
     "sample_size": 1234,
