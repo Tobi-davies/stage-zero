@@ -2,8 +2,8 @@ import axios from "axios";
 
 export const classifyName = async (req, res) => {
   try {
-    // const { name } = req.query;
-    const { name } = req.params;
+    const { name } = req.query;
+    // const { name } = req.params;
 
     if (!name) {
       return res.status(400).json({
