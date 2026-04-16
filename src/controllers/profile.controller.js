@@ -183,7 +183,6 @@ const getAllProfiles = async (req, res) => {
 const deleteProfile = async (req, res) => {
   try {
     const { id } = req.params;
-    console.log(id);
 
     if (!id) {
       return res.status(400).json({
@@ -193,8 +192,6 @@ const deleteProfile = async (req, res) => {
     }
 
     const deleted = await Profile.findOneAndDelete({ id });
-
-    console.log(deleted, "deleted");
 
     if (!deleted)
       return res.status(404).json({
