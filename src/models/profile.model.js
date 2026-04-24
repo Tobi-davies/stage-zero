@@ -1,11 +1,13 @@
 import mongoose, { Schema } from "mongoose";
+import { v7 as uuidv7 } from "uuid";
 
 const profileSchema = new Schema(
   {
     id: {
       type: String,
-      required: true,
+      // required: true,
       unique: true,
+      default: () => uuidv7(),
     },
 
     name: {
@@ -13,6 +15,7 @@ const profileSchema = new Schema(
       required: true,
       lowercase: true,
       trim: true,
+      // unique: true,
     },
 
     gender: {
@@ -27,10 +30,10 @@ const profileSchema = new Schema(
       max: 1,
     },
 
-    sample_size: {
-      type: Number,
-      min: 0,
-    },
+    // sample_size: {
+    //   type: Number,
+    //   min: 0,
+    // },
 
     age: {
       type: Number,
@@ -48,6 +51,12 @@ const profileSchema = new Schema(
       trim: true,
     },
 
+    country_name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
     country_probability: {
       type: Number,
       min: 0,
@@ -56,7 +65,7 @@ const profileSchema = new Schema(
 
     created_at: {
       type: Date,
-      required: true,
+      // required: true,
       default: Date.now,
     },
   },
