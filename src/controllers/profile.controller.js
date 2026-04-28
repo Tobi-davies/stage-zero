@@ -3,6 +3,7 @@ import { v7 as uuidv7 } from "uuid";
 import { Profile } from "../models/profile.model.js";
 import { validate as isUUID } from "uuid";
 import { externalApiError } from "../lib/utils.js";
+import { parseNaturalQuery } from "../utils/naturalLang.js";
 
 const CreateProfile = async (req, res) => {
   try {
@@ -47,6 +48,8 @@ const CreateProfile = async (req, res) => {
     const { age } = ageDetails?.data;
 
     const { country } = nationalityDetails?.data;
+
+    console.log(nationalityDetails.data);
 
     //error handling
     if (!gender || count === 0) {
@@ -105,6 +108,7 @@ const CreateProfile = async (req, res) => {
   }
 };
 
+//Fetch single profile
 const getSingleProfile = async (req, res) => {
   try {
     const { id } = req.params;
@@ -144,9 +148,22 @@ const getSingleProfile = async (req, res) => {
   }
 };
 
+// Fetch all profile
 const getAllProfiles = async (req, res) => {
   try {
-    const { gender, country_id, age_group } = req.query;
+    const {
+      gender,
+      country_id,
+      age_group,
+      min_age,
+      max_age,
+      min_gender_probability,
+      min_country_probability,
+      sort_by,
+      order,
+      page = 1,
+      limit = 10,
+    } = req.query;
 
     const query = {};
 
@@ -162,14 +179,117 @@ const getAllProfiles = async (req, res) => {
       query.age_group = new RegExp(`^${age_group}$`, "i");
     }
 
+    // if (min_age) {
+    //   query.age = { $gte: Number(min_age) };
+    // }
+
+    // if (max_age) {
+    //   query.age = { $lte: Number(max_age) };
+    // }
+
+    if (min_age || max_age) {
+      query.age = {};
+      if (min_age) query.age.$gte = Number(min_age);
+      if (max_age) query.age.$lte = Number(max_age);
+    }
+
+    if (min_country_probability) {
+      query.country_probability = {};
+      if (min_country_probability)
+        query.country_probability.$gte = Number(min_country_probability);
+    }
+
+    if (min_gender_probability) {
+      query.gender_probability = {};
+      if (min_gender_probability)
+        query.gender_probability.$gte = Number(min_gender_probability);
+    }
+
+    // default sorting
+    let sortOption = { created_at: -1 };
+
+    if (sort_by) {
+      const allowedFields = ["age", "created_at", "gender_probability"];
+
+      // validate field
+      if (!allowedFields.includes(sort_by)) {
+        return res.status(422).json({
+          status: "error",
+          message: "Invalid query parameters",
+        });
+      }
+
+      // normalize order
+      const sortOrder = order === "asc" ? 1 : -1;
+
+      sortOption = {
+        [sort_by]: sortOrder,
+      };
+    }
+
+    // 📄 Pagination
+    const pageNumber = Number(page);
+    const limitNumber = Math.min(Number(limit) || 10, 50);
+    const skip = (pageNumber - 1) * limitNumber;
+
     //Get data from database
-    const profiles = await Profile.find(query).select(
-      "id name gender age age_group country_id",
-    );
+    // const profiles = await Profile.find(query).select(
+    //   "id name gender age age_group country_id",
+    // );
+
+    // Query execution
+    const [profiles, total] = await Promise.all([
+      Profile.find(query).sort(sortOption).skip(skip).limit(limitNumber),
+      Profile.countDocuments(query),
+    ]);
+
+    // console.log(total, "totaltotal");
+    // ?gender=male&country_id=NG&min_age=25&max_age=40&page=2&limit=15
 
     res.status(200).json({
       status: "success",
-      count: profiles.length,
+      page: pageNumber,
+      limit: limitNumber,
+      total: total,
+      data: profiles,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Internal server error",
+    });
+  }
+};
+
+const SearchProfiles = async (req, res) => {
+  try {
+    const { q, page = 1, limit = 10 } = req.query;
+    console.log(q);
+
+    const filter = parseNaturalQuery(q);
+
+    if (!filter) {
+      return res.status(400).json({
+        status: "error",
+        message: "Unable to interpret query",
+      });
+    }
+
+    // pagination
+    const limitNum = Math.min(Number(limit) || 10, 50);
+    const pageNum = Math.max(Number(page) || 1, 1);
+    const skip = (pageNum - 1) * limitNum;
+
+    const [profiles, total] = await Promise.all([
+      Profile.find(filter).skip(skip).limit(limitNum),
+      Profile.countDocuments(filter),
+    ]);
+
+    res.status(200).json({
+      status: "success",
+      page: pageNum,
+      limit: limitNum,
+      total,
       data: profiles,
     });
   } catch (error) {
@@ -205,4 +325,10 @@ const deleteProfile = async (req, res) => {
   }
 };
 
-export { CreateProfile, getSingleProfile, getAllProfiles, deleteProfile };
+export {
+  CreateProfile,
+  getSingleProfile,
+  getAllProfiles,
+  deleteProfile,
+  SearchProfiles,
+};

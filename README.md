@@ -1,297 +1,400 @@
-## Profile Intelligence Service
-
----
+# Intelligence Query Engine API
 
 ## Overview
 
-This project is a **Profile Intelligence Service API** built with **Node.js, Express, and MongoDB**.
+This project is a backend system built for **Insighta Labs**, a demographic intelligence platform. It transforms stored profile data into a **Queryable Intelligence Engine**, enabling clients to:
 
-It accepts a name, enriches it using multiple external APIs, processes the data, stores it in a database, and exposes RESTful endpoints for retrieval and management.
+- Filter datasets using multiple conditions
+- Sort and paginate results efficiently
+- Perform natural language queries
 
----
-
-## 🎯 Objectives
-
-This project demonstrates the ability to:
-
-- Integrate multiple third-party APIs
-- Process and structure data
-- Persist data in a database
-- Design RESTful APIs
-- Handle idempotent requests
-- Implement robust error handling
+The system is designed to handle structured queries and convert plain English input into database filters.
 
 ---
 
-## 🌐 Live API
+## 🚀 Base URL
 
-👉 **Base URL**
-
-```id="live-url"
-stage-zero-production.up.railway.app
+```
+https://stage-zero-production.up.railway.app
 ```
 
 ---
 
-## 🔗 External APIs Used
+## 🗄️ Database Schema
 
-- Genderize → https://api.genderize.io
-- Agify → https://api.agify.io
-- Nationalize → https://api.nationalize.io
-
----
-
-## ⚙️ Data Processing Rules
-
-- **Genderize**
-  - Extract: `gender`, `probability`, `count`
-  - Rename `count` → `sample_size`
-
-- **Agify**
-  - Extract: `age`
-  - Derive `age_group`:
-    - 0–12 → child
-    - 13–19 → teenager
-    - 20–59 → adult
-    - 60+ → senior
-
-- **Nationalize**
-  - Extract country list
-  - Select country with highest probability → `country_id`
-
-- Add:
-  - `id` → UUID v7
-  - `created_at` → UTC ISO 8601 timestamp
+| Field               | Type      | Description                    |
+| ------------------- | --------- | ------------------------------ |
+| id                  | UUID v7   | Primary key                    |
+| name                | String    | Unique full name               |
+| gender              | String    | male / female                  |
+| gender_probability  | Float     | Confidence score               |
+| age                 | Number    | Exact age                      |
+| age_group           | String    | child, teenager, adult, senior |
+| country_id          | String(2) | ISO code (NG, KE, etc.)        |
+| country_name        | String    | Full country name              |
+| country_probability | Float     | Confidence score               |
+| created_at          | Date      | Auto-generated (UTC ISO 8601)  |
 
 ---
 
-## 📦 API Endpoints
+## 🌱 Data Seeding
 
----
+- Dataset: 2026 profiles
+- Duplicate-safe seeding
+- Command:
 
-### 🔹 1. Create Profile
-
-```id="endpoint1"
-POST /api/profiles
 ```
-
-#### Request
-
-```json id="req1"
-{
-  "name": "ella"
-}
-```
-
-#### Success Response (201)
-
-```json id="res1"
-{
-  "status": "success",
-  "data": {
-    "id": "uuid-v7",
-    "name": "ella",
-    "gender": "female",
-    "gender_probability": 0.99,
-    "sample_size": 1234,
-    "age": 46,
-    "age_group": "adult",
-    "country_id": "DRC",
-    "country_probability": 0.85,
-    "created_at": "2026-04-01T12:00:00Z"
-  }
-}
+npm run seed
 ```
 
 ---
 
-### 🔁 Idempotency
-
-If the same name already exists:
-
-```json id="idem"
-{
-  "status": "success",
-  "message": "Profile already exists",
-  "data": { "...existing profile..." }
-}
-```
+# 🔍 API FEATURES
 
 ---
 
-### 🔹 2. Get Profile by ID
+## 1. Advanced Filtering
 
-```id="endpoint2"
-GET /api/profiles/:id
+### Endpoint
+
 ```
-
-#### Response (200)
-
-```json id="res2"
-{
-  "status": "success",
-  "data": { "...profile data..." }
-}
-```
-
----
-
-### 🔹 3. Get All Profiles
-
-```id="endpoint3"
 GET /api/profiles
 ```
 
-#### Optional Query Params
+### Supported Parameters
 
-- `gender`
-- `country_id`
-- `age_group`
+- gender
+- age_group
+- country_id
+- min_age
+- max_age
+- min_gender_probability
+- min_country_probability
 
-Example:
+### Example
 
-```id="example1"
-/api/profiles?gender=male&country_id=NG
+```
+/api/profiles?gender=male&country_id=NG&min_age=25
 ```
 
-#### Response (200)
+✔ Filters are **combinable (AND logic)**
 
-```json id="res3"
+---
+
+## 2. Sorting
+
+### Parameters
+
+- `sort_by` → age | created_at | gender_probability
+- `order` → asc | desc
+
+### Example
+
+```
+/api/profiles?sort_by=age&order=desc
+```
+
+---
+
+## 3. Pagination
+
+### Parameters
+
+- page (default: 1)
+- limit (default: 10, max: 50)
+
+### Response Format
+
+```json
 {
   "status": "success",
-  "count": 2,
-  "data": [
-    {
-      "id": "id-1",
-      "name": "emmanuel",
-      "gender": "male",
-      "age": 25,
-      "age_group": "adult",
-      "country_id": "NG"
-    }
-  ]
+  "page": 1,
+  "limit": 10,
+  "total": 2026,
+  "data": []
 }
 ```
 
 ---
 
-### 🔹 4. Delete Profile
+## 🧠 4. Natural Language Search
 
-```id="endpoint4"
-DELETE /api/profiles/:id
+### Endpoint
+
+```
+GET /api/profiles/search?q=<query>
 ```
 
-#### Response
+### Example
 
-```id="res4"
-204 No Content
+```
+/api/profiles/search?q=young males from nigeria
 ```
 
 ---
 
-## 🚨 Error Handling
+# ⚙️ Parser Implementation
 
-All errors follow this format:
+## 📌 Approach
 
-```json id="err-format"
+The system uses a **rule-based natural language parser**, as required.
+
+It converts plain English queries into structured MongoDB filters using:
+
+- Keyword detection
+- Regular expressions
+- Dynamic country mapping from dataset
+
+---
+
+## 🔄 Parsing Workflow
+
+### 1. Normalization
+
+- Converts query to lowercase
+- Removes casing inconsistencies
+
+---
+
+### 2. Gender Detection
+
+Uses regex word boundaries to avoid substring bugs:
+
+```js
+const hasMale = /\bmale\b/.test(q);
+const hasFemale = /\bfemale\b/.test(q);
+```
+
+| Input           | Output           |
+| --------------- | ---------------- |
+| male            | gender = male    |
+| female          | gender = female  |
+| male and female | no gender filter |
+
+---
+
+### 3. Age Group Detection
+
+| Keyword | Mapping              |
+| ------- | -------------------- |
+| child   | age_group = child    |
+| teen    | age_group = teenager |
+| adult   | age_group = adult    |
+| senior  | age_group = senior   |
+
+---
+
+### 4. Special Age Rules
+
+| Keyword | Mapping   |
+| ------- | --------- |
+| young   | age 16–24 |
+| old     | age ≥ 60  |
+
+---
+
+### 5. Numeric Conditions
+
+Extracted using regex:
+
+```
+above (\d+) → min_age
+below (\d+) → max_age
+```
+
+---
+
+### 6. Country Detection
+
+- Countries are dynamically extracted from the dataset
+- Uses pattern:
+
+```
+from <country>
+```
+
+- Applies longest-match strategy to avoid conflicts (e.g. Niger vs Nigeria)
+
+---
+
+## 🧪 Example Query Mappings
+
+| Query                              | Output                                      |
+| ---------------------------------- | ------------------------------------------- |
+| young males                        | gender=male, age 16–24                      |
+| females above 30                   | gender=female, min_age=30                   |
+| people from angola                 | country_id=AO                               |
+| adult males from kenya             | gender=male, age_group=adult, country_id=KE |
+| male and female teenagers above 17 | age_group=teenager, min_age=17              |
+
+---
+
+# ⚠️ Parser Limitations
+
+### 1. Keyword Dependency
+
+Only predefined keywords are supported.
+
+❌ Not supported:
+
+- "elderly women"
+- "middle-aged men"
+
+---
+
+### 2. No Synonym Handling
+
+| Input  | Result         |
+| ------ | -------------- |
+| women  | not recognized |
+| guys   | not recognized |
+| ladies | not recognized |
+
+---
+
+### 3. Limited Grammar Understanding
+
+Supports simple patterns only:
+
+- "from <country>"
+- "above <number>"
+
+❌ Complex queries fail:
+
+```
+people who live in nigeria
+```
+
+---
+
+### 4. Country Matching Limitations
+
+- Requires correct spelling
+- No fuzzy matching
+- Partial matches may fail
+
+---
+
+### 5. Interpreted Flag Constraint
+
+Parser uses an `interpreted` flag:
+
+```js
+return interpreted ? filter : null;
+```
+
+This may cause valid queries like:
+
+```
+people from angola
+```
+
+to return `null` if no other condition sets the flag.
+
+---
+
+### 6. Performance Overhead
+
+- JSON file is read on every request
+- Causes unnecessary I/O operations
+
+---
+
+# 🚀 Performance Optimizations
+
+- MongoDB indexing:
+  - age
+  - country_id
+  - gender
+
+- Pagination prevents large dataset loads
+- Efficient query building
+
+---
+
+# 🔐 Rate Limiting
+
+- Protects API from abuse
+- Limits requests per IP
+
+---
+
+# 🌍 CORS
+
+```
+Access-Control-Allow-Origin: *
+```
+
+---
+
+# 🚨 Error Handling
+
+### Format
+
+```json
 {
   "status": "error",
   "message": "Error message"
 }
 ```
 
----
+### Status Codes
 
-### Error Types
-
-| Status | Description           |
-| ------ | --------------------- |
-| 400    | Missing or empty name |
-| 422    | Invalid input type    |
-| 404    | Profile not found     |
-| 500    | Internal server error |
-| 502    | External API failure  |
+| Code | Meaning            |
+| ---- | ------------------ |
+| 400  | Bad Request        |
+| 422  | Invalid parameters |
+| 404  | Not found          |
+| 500  | Server error       |
 
 ---
 
-## 🌐 External API Errors
-
-```json id="ext-err"
-{
-  "status": "502",
-  "message": "Genderize returned an invalid response"
-}
-```
-
-Applies to:
-
-- Genderize
-- Agify
-- Nationalize
-
----
-
-## ⚠️ Edge Case Handling
-
-- Genderize → `gender = null` OR `count = 0` → 502
-- Agify → `age = null` → 502
-- Nationalize → no country data → 502
-
-👉 Data is **not stored** in these cases
-
----
-
-## 🧠 Idempotency
-
-- Duplicate names are not stored twice
-- Existing record is returned instead
-
----
-
-## 🛠️ Tech Stack
+# 🛠️ Tech Stack
 
 - Node.js
 - Express.js
-- MongoDB + Mongoose
-- Axios
-- UUID (v7)
+- MongoDB (Mongoose)
+- UUID v7
 
 ---
 
-## ⚡ Performance Optimization
+# 📦 Setup
 
-- In-memory caching reduces repeated API calls
-- Improves response time for repeated requests
-- Handles concurrent requests efficiently
-
----
-
-## 🔐 Additional Requirements
-
-- ✅ CORS enabled (`Access-Control-Allow-Origin: *`)
-- ✅ All timestamps in UTC ISO format
-- ✅ UUID v7 for all IDs
-- ✅ Exact response structure compliance
-
----
-
-## 🧪 Running Locally
-
-```id="run1"
-git clone https://github.com/Tobi-davies/stage-zero.git
-cd your-repo
+```bash
+git clone <repo>
+cd project
 npm install
-npm run dev
+```
+
+### Run server
+
+```bash
+npm start
+```
+
+### Seed database
+
+```bash
+npm run seed
 ```
 
 ---
 
-## 📌 Submission Details
+# ✅ Evaluation Coverage
 
-- **GitHub Repo:**
-  https://github.com/Tobi-davies/stage-zero
+- Advanced Filtering ✔
+- Combined Filters ✔
+- Sorting ✔
+- Pagination ✔
+- Natural Language Parsing ✔
+- Query Validation ✔
+- Performance ✔
 
-- **Live API:**
-  stage-zero-production.up.railway.app
+---
+
+# 🔗 Submission
+
+- GitHub Repo: `https://github.com/Tobi-davies/stage-zero`
+- API URL: `https://stage-zero-production.up.railway.app`
 
 ---

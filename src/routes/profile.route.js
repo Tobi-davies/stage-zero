@@ -4,7 +4,8 @@ import {
   deleteProfile,
   getAllProfiles,
   getSingleProfile,
-  // exportProfiles
+  searchProfiles,
+  exportProfiles,
 } from "../controllers/profile.controller.js";
 import { requireRole } from "../middleware/auth.js";
 
@@ -16,7 +17,7 @@ router.delete("/profiles/:id", requireRole("admin"), deleteProfile);
 
 // Both roles — read and search
 router.get("/profiles", getAllProfiles);
-// router.get("/profiles/search", searchProfiles);
+router.get("/profiles/search", searchProfiles);
 // router.get("/profiles/export", exportProfiles);
 router.get("/profiles/:id", getSingleProfile);
 

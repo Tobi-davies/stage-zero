@@ -32,3 +32,6 @@ const startServer = async () => {
 };
 
 startServer();
+
+// https://stage-zero-production.up.railway.app
+// https://github.com/Tobi-davies/stage-zero
