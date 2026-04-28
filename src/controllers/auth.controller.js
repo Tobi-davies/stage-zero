@@ -257,6 +257,9 @@ const redirectToGithub = async (req, res) => {
 //     res.status(500).json({ status: "error", message: "Authentication failed" });
 //   }
 // };
+
+const isProduction = process.env.NODE_ENV === "production";
+
 const handleGithubCallback = async (req, res) => {
   const { code, state: encodedState } = req.query;
 
@@ -306,14 +309,16 @@ const handleGithubCallback = async (req, res) => {
     res
       .cookie("access_token", access_token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax",
         maxAge: 3 * 60 * 1000,
       })
       .cookie("refresh_token", refresh_token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        // secure: process.env.NODE_ENV === "production",
+        // sameSite: "lax",
+        secure: isProduction, // true in prod (HTTPS required for SameSite=none)
+        sameSite: isProduction ? "none" : "lax",
         maxAge: 5 * 60 * 1000,
       })
       .redirect(`${process.env.CLIENT_URL}/`);
@@ -390,7 +395,7 @@ const handleCliCallback = async (req, res) => {
 // ── POST /auth/refresh ────────────────────────────────────────────────────────
 
 const refreshTokens = async (req, res) => {
-  const rawRefreshToken = req.body.refresh_token || req.cookies?.refresh_token;
+  const rawRefreshToken = req.body?.refresh_token || req.cookies?.refresh_token;
 
   if (!rawRefreshToken) {
     return res
@@ -422,14 +427,14 @@ const refreshTokens = async (req, res) => {
     res
       .cookie("access_token", access_token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax",
         maxAge: 3 * 60 * 1000,
       })
       .cookie("refresh_token", refresh_token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax",
         maxAge: 5 * 60 * 1000,
       })
       .json({ status: "success", access_token, refresh_token });
@@ -465,9 +470,19 @@ const logout = async (req, res) => {
     await AuthService.consumeRefreshToken(rawRefreshToken);
   }
 
+  //   res
+  //     .clearCookie("access_token")
+  //     .clearCookie("refresh_token")
+  //     .json({ status: "success", message: "Logged out" });
   res
-    .clearCookie("access_token")
-    .clearCookie("refresh_token")
+    .clearCookie("access_token", {
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+    })
+    .clearCookie("refresh_token", {
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+    })
     .json({ status: "success", message: "Logged out" });
 };
 

@@ -1,400 +1,105 @@
-# Intelligence Query Engine API
+# Insighta Labs+ — Backend
 
-## Overview
-
-This project is a backend system built for **Insighta Labs**, a demographic intelligence platform. It transforms stored profile data into a **Queryable Intelligence Engine**, enabling clients to:
-
-- Filter datasets using multiple conditions
-- Sort and paginate results efficiently
-- Perform natural language queries
-
-The system is designed to handle structured queries and convert plain English input into database filters.
-
----
-
-## 🚀 Base URL
+## System Architecture
 
 ```
-https://stage-zero-production.up.railway.app
+CLI ─────────────┐
+                 ├──► Express API ──► MongoDB
+Web Portal ──────┘
 ```
 
----
+- **Runtime**: Node.js + Express
+- **Database**: MongoDB (Mongoose)
+- **Auth**: GitHub OAuth 2.0 with PKCE
+- **Tokens**: JWT (access: 3min, refresh: 5min)
 
-## 🗄️ Database Schema
+## Authentication Flow
 
-| Field               | Type      | Description                    |
-| ------------------- | --------- | ------------------------------ |
-| id                  | UUID v7   | Primary key                    |
-| name                | String    | Unique full name               |
-| gender              | String    | male / female                  |
-| gender_probability  | Float     | Confidence score               |
-| age                 | Number    | Exact age                      |
-| age_group           | String    | child, teenager, adult, senior |
-| country_id          | String(2) | ISO code (NG, KE, etc.)        |
-| country_name        | String    | Full country name              |
-| country_probability | Float     | Confidence score               |
-| created_at          | Date      | Auto-generated (UTC ISO 8601)  |
+1. Client visits `GET /auth/github`
+2. Backend generates PKCE pair + state, redirects to GitHub
+3. GitHub redirects to `GET /auth/github/callback`
+4. Backend exchanges code + verifier with GitHub
+5. Backend upserts user, issues access + refresh tokens
+6. **Web**: tokens set as HTTP-only cookies, redirect to dashboard
+7. **CLI**: tokens returned as JSON via redirect to local server
 
----
+## Token Handling
 
-## 🌱 Data Seeding
+- Access token expires in **3 minutes**
+- Refresh token expires in **5 minutes**
+- Refresh tokens are **single-use** — rotated on every refresh
+- Tokens are stored hashed in MongoDB
 
-- Dataset: 2026 profiles
-- Duplicate-safe seeding
-- Command:
+## Role Enforcement
 
-```
-npm run seed
-```
+| Role    | Permissions                   |
+| ------- | ----------------------------- |
+| admin   | Full CRUD on profiles         |
+| analyst | Read-only (list, get, search) |
 
----
+Default role on signup: `analyst`
 
-# 🔍 API FEATURES
+Enforcement is centralized in `src/middleware/auth.js`:
 
----
+- `authenticate` — verifies JWT, attaches user to request
+- `requireRole(...roles)` — checks user role
+- `requireApiVersion` — enforces `X-API-Version: 1` header
 
-## 1. Advanced Filtering
+## API Endpoints
 
-### Endpoint
+### Auth
 
-```
-GET /api/profiles
-```
+| Method | Endpoint              | Description          |
+| ------ | --------------------- | -------------------- |
+| GET    | /auth/github          | Start OAuth flow     |
+| GET    | /auth/github/callback | OAuth callback (web) |
+| POST   | /auth/github/callback | OAuth callback (CLI) |
+| POST   | /auth/refresh         | Refresh tokens       |
+| POST   | /auth/logout          | Logout               |
+| GET    | /auth/me              | Current user         |
 
-### Supported Parameters
+### Profiles
 
-- gender
-- age_group
-- country_id
-- min_age
-- max_age
-- min_gender_probability
-- min_country_probability
+All require `X-API-Version: 1` header and authentication.
 
-### Example
+| Method | Endpoint             | Role  | Description    |
+| ------ | -------------------- | ----- | -------------- |
+| GET    | /api/profiles        | any   | List profiles  |
+| GET    | /api/profiles/:id    | any   | Get profile    |
+| GET    | /api/profiles/search | any   | NL search      |
+| GET    | /api/profiles/export | any   | Export CSV     |
+| POST   | /api/profiles        | admin | Create profile |
+| DELETE | /api/profiles/:id    | admin | Delete profile |
 
-```
-/api/profiles?gender=male&country_id=NG&min_age=25
-```
+## Natural Language Parsing
 
-✔ Filters are **combinable (AND logic)**
+Queries like "young males from Nigeria" are parsed into MongoDB filters
+using keyword matching in `src/utils/naturalLang.js`.
 
----
+## Rate Limiting
 
-## 2. Sorting
+| Scope    | Limit           |
+| -------- | --------------- |
+| /auth/\* | 10 req/min      |
+| /api/\*  | 60 req/min/user |
 
-### Parameters
-
-- `sort_by` → age | created_at | gender_probability
-- `order` → asc | desc
-
-### Example
-
-```
-/api/profiles?sort_by=age&order=desc
-```
-
----
-
-## 3. Pagination
-
-### Parameters
-
-- page (default: 1)
-- limit (default: 10, max: 50)
-
-### Response Format
-
-```json
-{
-  "status": "success",
-  "page": 1,
-  "limit": 10,
-  "total": 2026,
-  "data": []
-}
-```
-
----
-
-## 🧠 4. Natural Language Search
-
-### Endpoint
-
-```
-GET /api/profiles/search?q=<query>
-```
-
-### Example
-
-```
-/api/profiles/search?q=young males from nigeria
-```
-
----
-
-# ⚙️ Parser Implementation
-
-## 📌 Approach
-
-The system uses a **rule-based natural language parser**, as required.
-
-It converts plain English queries into structured MongoDB filters using:
-
-- Keyword detection
-- Regular expressions
-- Dynamic country mapping from dataset
-
----
-
-## 🔄 Parsing Workflow
-
-### 1. Normalization
-
-- Converts query to lowercase
-- Removes casing inconsistencies
-
----
-
-### 2. Gender Detection
-
-Uses regex word boundaries to avoid substring bugs:
-
-```js
-const hasMale = /\bmale\b/.test(q);
-const hasFemale = /\bfemale\b/.test(q);
-```
-
-| Input           | Output           |
-| --------------- | ---------------- |
-| male            | gender = male    |
-| female          | gender = female  |
-| male and female | no gender filter |
-
----
-
-### 3. Age Group Detection
-
-| Keyword | Mapping              |
-| ------- | -------------------- |
-| child   | age_group = child    |
-| teen    | age_group = teenager |
-| adult   | age_group = adult    |
-| senior  | age_group = senior   |
-
----
-
-### 4. Special Age Rules
-
-| Keyword | Mapping   |
-| ------- | --------- |
-| young   | age 16–24 |
-| old     | age ≥ 60  |
-
----
-
-### 5. Numeric Conditions
-
-Extracted using regex:
-
-```
-above (\d+) → min_age
-below (\d+) → max_age
-```
-
----
-
-### 6. Country Detection
-
-- Countries are dynamically extracted from the dataset
-- Uses pattern:
-
-```
-from <country>
-```
-
-- Applies longest-match strategy to avoid conflicts (e.g. Niger vs Nigeria)
-
----
-
-## 🧪 Example Query Mappings
-
-| Query                              | Output                                      |
-| ---------------------------------- | ------------------------------------------- |
-| young males                        | gender=male, age 16–24                      |
-| females above 30                   | gender=female, min_age=30                   |
-| people from angola                 | country_id=AO                               |
-| adult males from kenya             | gender=male, age_group=adult, country_id=KE |
-| male and female teenagers above 17 | age_group=teenager, min_age=17              |
-
----
-
-# ⚠️ Parser Limitations
-
-### 1. Keyword Dependency
-
-Only predefined keywords are supported.
-
-❌ Not supported:
-
-- "elderly women"
-- "middle-aged men"
-
----
-
-### 2. No Synonym Handling
-
-| Input  | Result         |
-| ------ | -------------- |
-| women  | not recognized |
-| guys   | not recognized |
-| ladies | not recognized |
-
----
-
-### 3. Limited Grammar Understanding
-
-Supports simple patterns only:
-
-- "from <country>"
-- "above <number>"
-
-❌ Complex queries fail:
-
-```
-people who live in nigeria
-```
-
----
-
-### 4. Country Matching Limitations
-
-- Requires correct spelling
-- No fuzzy matching
-- Partial matches may fail
-
----
-
-### 5. Interpreted Flag Constraint
-
-Parser uses an `interpreted` flag:
-
-```js
-return interpreted ? filter : null;
-```
-
-This may cause valid queries like:
-
-```
-people from angola
-```
-
-to return `null` if no other condition sets the flag.
-
----
-
-### 6. Performance Overhead
-
-- JSON file is read on every request
-- Causes unnecessary I/O operations
-
----
-
-# 🚀 Performance Optimizations
-
-- MongoDB indexing:
-  - age
-  - country_id
-  - gender
-
-- Pagination prevents large dataset loads
-- Efficient query building
-
----
-
-# 🔐 Rate Limiting
-
-- Protects API from abuse
-- Limits requests per IP
-
----
-
-# 🌍 CORS
-
-```
-Access-Control-Allow-Origin: *
-```
-
----
-
-# 🚨 Error Handling
-
-### Format
-
-```json
-{
-  "status": "error",
-  "message": "Error message"
-}
-```
-
-### Status Codes
-
-| Code | Meaning            |
-| ---- | ------------------ |
-| 400  | Bad Request        |
-| 422  | Invalid parameters |
-| 404  | Not found          |
-| 500  | Server error       |
-
----
-
-# 🛠️ Tech Stack
-
-- Node.js
-- Express.js
-- MongoDB (Mongoose)
-- UUID v7
-
----
-
-# 📦 Setup
+## Setup
 
 ```bash
-git clone <repo>
-cd project
 npm install
+cp .env.example .env   # fill in values
+npm run dev
 ```
 
-### Run server
+## Environment Variables
 
-```bash
-npm start
 ```
-
-### Seed database
-
-```bash
-npm run seed
+MONGODB_URI=
+JWT_ACCESS_SECRET=
+JWT_REFRESH_SECRET=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GITHUB_CALLBACK_URL=
+CLIENT_URL=
+PORT=4000
 ```
-
----
-
-# ✅ Evaluation Coverage
-
-- Advanced Filtering ✔
-- Combined Filters ✔
-- Sorting ✔
-- Pagination ✔
-- Natural Language Parsing ✔
-- Query Validation ✔
-- Performance ✔
-
----
-
-# 🔗 Submission
-
-- GitHub Repo: `https://github.com/Tobi-davies/stage-zero`
-- API URL: `https://stage-zero-production.up.railway.app`
-
----
