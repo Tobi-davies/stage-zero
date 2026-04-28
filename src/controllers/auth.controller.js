@@ -47,15 +47,43 @@ function issueTokens(user) {
 
 // Starts the OAuth flow — redirects browser to GitHub
 
+//First approved update
+// const redirectToGithub = async (req, res) => {
+//   console.log("CLIENT_ID:", process.env.GITHUB_CLIENT_ID);
+//   console.log("CALLBACK_URL:", process.env.GITHUB_CALLBACK_URL);
+//   const { code_verifier, code_challenge, state } = generatePKCE();
+
+//   // Store verifier temporarily so callback can retrieve it
+//   pkceStore.set(state, { code_verifier, createdAt: Date.now() });
+
+//   // Clean up stale entries older than 10 minutes
+//   for (const [key, val] of pkceStore.entries()) {
+//     if (Date.now() - val.createdAt > 10 * 60 * 1000) pkceStore.delete(key);
+//   }
+
+//   const params = new URLSearchParams({
+//     client_id: process.env.GITHUB_CLIENT_ID,
+//     redirect_uri: process.env.GITHUB_CALLBACK_URL,
+//     scope: "user:email",
+//     state,
+//     code_challenge,
+//     code_challenge_method: "S256",
+//   });
+
+//   res.redirect(`https://github.com/login/oauth/authorize?${params}`);
+// };
 const redirectToGithub = async (req, res) => {
-  console.log("CLIENT_ID:", process.env.GITHUB_CLIENT_ID);
-  console.log("CALLBACK_URL:", process.env.GITHUB_CALLBACK_URL);
   const { code_verifier, code_challenge, state } = generatePKCE();
+  const isCli = req.query.cli === "true";
+  const port = req.query.port || "9876";
 
-  // Store verifier temporarily so callback can retrieve it
-  pkceStore.set(state, { code_verifier, createdAt: Date.now() });
+  // Encode cli info into state so callback knows where to redirect
+  const statePayload = JSON.stringify({ state, isCli, port });
+  const encodedState = Buffer.from(statePayload).toString("base64url");
 
-  // Clean up stale entries older than 10 minutes
+  pkceStore.set(encodedState, { code_verifier, createdAt: Date.now() });
+
+  // Clean stale entries
   for (const [key, val] of pkceStore.entries()) {
     if (Date.now() - val.createdAt > 10 * 60 * 1000) pkceStore.delete(key);
   }
@@ -64,7 +92,7 @@ const redirectToGithub = async (req, res) => {
     client_id: process.env.GITHUB_CLIENT_ID,
     redirect_uri: process.env.GITHUB_CALLBACK_URL,
     scope: "user:email",
-    state,
+    state: encodedState,
     code_challenge,
     code_challenge_method: "S256",
   });
@@ -176,18 +204,81 @@ const redirectToGithub = async (req, res) => {
 // };
 
 // GitHub redirects here after user authenticates (Web flow)
-const handleGithubCallback = async (req, res) => {
-  const { code, state } = req.query;
+//first approved
+// const handleGithubCallback = async (req, res) => {
+//   const { code, state } = req.query;
 
-  // Validate state
-  const pkceEntry = pkceStore.get(state);
+//   // Validate state
+//   const pkceEntry = pkceStore.get(state);
+//   if (!pkceEntry) {
+//     return res
+//       .status(400)
+//       .json({ status: "error", message: "Invalid or expired state" });
+//   }
+//   const { code_verifier } = pkceEntry;
+//   pkceStore.delete(state);
+
+//   try {
+//     const user = await exchangeCodeForUser(code, code_verifier);
+
+//     if (!user.is_active) {
+//       return res
+//         .status(403)
+//         .json({ status: "error", message: "Account disabled" });
+//     }
+
+//     const { access_token, refresh_token, refreshExpiresAt } = issueTokens(user);
+//     console.log("ACCESS TOKEN:", access_token);
+
+//     await AuthService.saveRefreshToken(
+//       user._id,
+//       refresh_token,
+//       refreshExpiresAt,
+//     );
+
+//     // Web flow — set HTTP-only cookies, redirect to dashboard
+//     res
+//       .cookie("access_token", access_token, {
+//         httpOnly: true,
+//         secure: process.env.NODE_ENV === "production",
+//         sameSite: "lax",
+//         maxAge: 3 * 60 * 1000, // 3 minutes
+//       })
+//       .cookie("refresh_token", refresh_token, {
+//         httpOnly: true,
+//         secure: process.env.NODE_ENV === "production",
+//         sameSite: "lax",
+//         maxAge: 5 * 60 * 1000, // 5 minutes
+//       })
+//       .redirect(`${process.env.CLIENT_URL}/`);
+//     //   .redirect(`${process.env.CLIENT_URL}/dashboard`);
+//   } catch (err) {
+//     console.error("OAuth callback error:", err.message);
+//     res.status(500).json({ status: "error", message: "Authentication failed" });
+//   }
+// };
+const handleGithubCallback = async (req, res) => {
+  const { code, state: encodedState } = req.query;
+
+  const pkceEntry = pkceStore.get(encodedState);
   if (!pkceEntry) {
     return res
       .status(400)
       .json({ status: "error", message: "Invalid or expired state" });
   }
   const { code_verifier } = pkceEntry;
-  pkceStore.delete(state);
+  pkceStore.delete(encodedState);
+
+  // Decode state to check if this is a CLI request
+  let isCli = false;
+  let port = "9876";
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(encodedState, "base64url").toString(),
+    );
+    isCli = decoded.isCli;
+    port = decoded.port || "9876";
+  } catch {}
 
   try {
     const user = await exchangeCodeForUser(code, code_verifier);
@@ -205,22 +296,27 @@ const handleGithubCallback = async (req, res) => {
       refreshExpiresAt,
     );
 
-    // Web flow — set HTTP-only cookies, redirect to dashboard
+    if (isCli) {
+      // Redirect tokens to CLI local server
+      const params = new URLSearchParams({ access_token, refresh_token });
+      return res.redirect(`http://localhost:${port}/callback?${params}`);
+    }
+
+    // Web flow — set cookies
     res
       .cookie("access_token", access_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
-        maxAge: 3 * 60 * 1000, // 3 minutes
+        maxAge: 3 * 60 * 1000,
       })
       .cookie("refresh_token", refresh_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
-        maxAge: 5 * 60 * 1000, // 5 minutes
+        maxAge: 5 * 60 * 1000,
       })
       .redirect(`${process.env.CLIENT_URL}/`);
-    //   .redirect(`${process.env.CLIENT_URL}/dashboard`);
   } catch (err) {
     console.error("OAuth callback error:", err.message);
     res.status(500).json({ status: "error", message: "Authentication failed" });

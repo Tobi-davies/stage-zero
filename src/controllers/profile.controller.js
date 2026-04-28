@@ -5,29 +5,89 @@ import { validate as isUUID } from "uuid";
 import { externalApiError } from "../lib/utils.js";
 import { parseNaturalQuery } from "../utils/naturalLang.js";
 
+// ── helpers
+function buildPaginationLinks(req, page, limit, total) {
+  const total_pages = Math.ceil(total / limit);
+  const base = `/api/profiles`;
+  const params = new URLSearchParams(req.query);
+
+  params.set("limit", limit);
+
+  params.set("page", page);
+  const self = `${base}?${params.toString()}`;
+
+  params.set("page", page + 1);
+  const next = page < total_pages ? `${base}?${params.toString()}` : null;
+
+  params.set("page", page - 1);
+  const prev = page > 1 ? `${base}?${params.toString()}` : null;
+
+  return { self, next, prev, total_pages };
+}
+
+function buildQuery(queryParams) {
+  const {
+    gender,
+    country_id,
+    age_group,
+    min_age,
+    max_age,
+    min_gender_probability,
+    min_country_probability,
+  } = queryParams;
+
+  const query = {};
+
+  if (gender) query.gender = new RegExp(`^${gender}$`, "i");
+  if (country_id) query.country_id = new RegExp(`^${country_id}$`, "i");
+  if (age_group) query.age_group = new RegExp(`^${age_group}$`, "i");
+
+  if (min_age || max_age) {
+    query.age = {};
+    if (min_age) query.age.$gte = Number(min_age);
+    if (max_age) query.age.$lte = Number(max_age);
+  }
+
+  if (min_country_probability) {
+    query.country_probability = { $gte: Number(min_country_probability) };
+  }
+
+  if (min_gender_probability) {
+    query.gender_probability = { $gte: Number(min_gender_probability) };
+  }
+
+  return query;
+}
+
+function buildSortOption(sort_by, order) {
+  if (!sort_by) return { created_at: -1 };
+
+  const allowedFields = ["age", "created_at", "gender_probability"];
+  if (!allowedFields.includes(sort_by)) return null;
+
+  return { [sort_by]: order === "asc" ? 1 : -1 };
+}
+
+// ── POST /api/profiles (admin only)
 const CreateProfile = async (req, res) => {
   try {
     const { name } = req.body;
 
     if (!name) {
-      return res.status(400).json({
-        status: "error",
-        message: "Name is required",
-      });
+      return res
+        .status(400)
+        .json({ status: "error", message: "Name is required" });
     }
 
     if (typeof name !== "string") {
-      return res.status(422).json({
-        status: "error",
-        message: "Name must be a string",
-      });
+      return res
+        .status(422)
+        .json({ status: "error", message: "Name must be a string" });
     }
 
     const formattedName = name.trim().toLowerCase();
 
-    // idempotency
     const existingProfile = await Profile.findOne({ name: formattedName });
-
     if (existingProfile) {
       return res.status(200).json({
         status: "success",
@@ -36,7 +96,6 @@ const CreateProfile = async (req, res) => {
       });
     }
 
-    //call external APIs
     const [genderDetails, ageDetails, nationalityDetails] = await Promise.all([
       axios.get(`https://api.genderize.io?name=${name}`),
       axios.get(`https://api.agify.io?name=${name}`),
@@ -44,240 +103,146 @@ const CreateProfile = async (req, res) => {
     ]);
 
     const { gender, probability, count } = genderDetails.data;
+    const { age } = ageDetails.data;
+    const { country } = nationalityDetails.data;
 
-    const { age } = ageDetails?.data;
-
-    const { country } = nationalityDetails?.data;
-
-    console.log(nationalityDetails.data);
-
-    //error handling
-    if (!gender || count === 0) {
-      return externalApiError(res, "Genderize");
-    }
-
-    if (age === null) {
-      return externalApiError(res, "Agify");
-    }
-
-    if (!country || country.length === 0) {
+    if (!gender || count === 0) return externalApiError(res, "Genderize");
+    if (age === null) return externalApiError(res, "Agify");
+    if (!country || country.length === 0)
       return externalApiError(res, "Nationalize");
-    }
-
-    const now = new Date().toISOString();
 
     const selectedCountry = country.reduce((max, current) =>
       current.probability > max.probability ? current : max,
     );
 
+    // Resolve country name
+    let country_name = null;
+    try {
+      const regionNames = new Intl.DisplayNames(["en"], { type: "region" });
+      country_name = regionNames.of(selectedCountry.country_id);
+    } catch (_) {}
+
     const result = {
       id: uuidv7(),
-      name,
+      name: formattedName,
       gender,
       gender_probability: probability,
-      sample_size: count,
       age,
       age_group:
-        age === 0 || age < 12
+        age < 12
           ? "child"
-          : age >= 13 && age < 20
+          : age < 20
             ? "teenager"
-            : age >= 20 && age < 60
+            : age < 60
               ? "adult"
               : "senior",
-      country_id: selectedCountry?.country_id,
-      country_probability: selectedCountry?.probability,
-      created_at: now,
+      country_id: selectedCountry.country_id,
+      country_name,
+      country_probability: selectedCountry.probability,
+      created_at: new Date().toISOString(),
     };
 
-    //create profile
-    const profile = await Profile.create({
-      ...result,
-    });
+    const profile = await Profile.create(result);
 
-    res.status(201).json({
-      status: "success",
-      data: profile,
-    });
+    res.status(201).json({ status: "success", data: profile });
   } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: "Something went wrong",
-      error,
-    });
+    res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong", error });
   }
 };
 
-//Fetch single profile
+// ── GET /api/profiles/:id
 const getSingleProfile = async (req, res) => {
   try {
     const { id } = req.params;
 
-    //validate id
-    if (!id) {
-      return res.status(400).json({
-        status: "error",
-        message: "Profile ID is required",
-      });
-    }
-
     if (!isUUID(id)) {
-      return res.status(422).json({
-        status: "error",
-        message: "Invalid ID format",
-      });
+      return res
+        .status(422)
+        .json({ status: "error", message: "Invalid ID format" });
     }
 
     const profile = await Profile.findOne({ id });
 
     if (!profile) {
-      return res.status(404).json({
-        status: "error",
-        message: "Profile not found",
-      });
+      return res
+        .status(404)
+        .json({ status: "error", message: "Profile not found" });
     }
 
-    res.status(200).json({
-      status: "success",
-      data: profile,
-    });
+    res.status(200).json({ status: "success", data: profile });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Internal server error", error: error.message });
+    res.status(500).json({ status: "error", message: "Internal server error" });
   }
 };
 
-// Fetch all profile
+// ── GET /api/profiles
 const getAllProfiles = async (req, res) => {
   try {
-    const {
-      gender,
-      country_id,
-      age_group,
-      min_age,
-      max_age,
-      min_gender_probability,
-      min_country_probability,
-      sort_by,
-      order,
-      page = 1,
-      limit = 10,
-    } = req.query;
+    const { sort_by, order, page = 1, limit = 10 } = req.query;
 
-    const query = {};
+    const query = buildQuery(req.query);
+    const sortOption = buildSortOption(sort_by, order);
 
-    if (gender) {
-      query.gender = new RegExp(`^${gender}$`, "i");
+    if (!sortOption) {
+      return res
+        .status(422)
+        .json({ status: "error", message: "Invalid sort_by field" });
     }
 
-    if (country_id) {
-      query.country_id = new RegExp(`^${country_id}$`, "i");
-    }
-
-    if (age_group) {
-      query.age_group = new RegExp(`^${age_group}$`, "i");
-    }
-
-    // if (min_age) {
-    //   query.age = { $gte: Number(min_age) };
-    // }
-
-    // if (max_age) {
-    //   query.age = { $lte: Number(max_age) };
-    // }
-
-    if (min_age || max_age) {
-      query.age = {};
-      if (min_age) query.age.$gte = Number(min_age);
-      if (max_age) query.age.$lte = Number(max_age);
-    }
-
-    if (min_country_probability) {
-      query.country_probability = {};
-      if (min_country_probability)
-        query.country_probability.$gte = Number(min_country_probability);
-    }
-
-    if (min_gender_probability) {
-      query.gender_probability = {};
-      if (min_gender_probability)
-        query.gender_probability.$gte = Number(min_gender_probability);
-    }
-
-    // default sorting
-    let sortOption = { created_at: -1 };
-
-    if (sort_by) {
-      const allowedFields = ["age", "created_at", "gender_probability"];
-
-      // validate field
-      if (!allowedFields.includes(sort_by)) {
-        return res.status(422).json({
-          status: "error",
-          message: "Invalid query parameters",
-        });
-      }
-
-      // normalize order
-      const sortOrder = order === "asc" ? 1 : -1;
-
-      sortOption = {
-        [sort_by]: sortOrder,
-      };
-    }
-
-    // 📄 Pagination
-    const pageNumber = Number(page);
+    const pageNumber = Math.max(Number(page), 1);
     const limitNumber = Math.min(Number(limit) || 10, 50);
     const skip = (pageNumber - 1) * limitNumber;
 
-    //Get data from database
-    // const profiles = await Profile.find(query).select(
-    //   "id name gender age age_group country_id",
-    // );
-
-    // Query execution
     const [profiles, total] = await Promise.all([
       Profile.find(query).sort(sortOption).skip(skip).limit(limitNumber),
       Profile.countDocuments(query),
     ]);
 
-    // console.log(total, "totaltotal");
-    // ?gender=male&country_id=NG&min_age=25&max_age=40&page=2&limit=15
+    const { self, next, prev, total_pages } = buildPaginationLinks(
+      req,
+      pageNumber,
+      limitNumber,
+      total,
+    );
 
     res.status(200).json({
       status: "success",
       page: pageNumber,
       limit: limitNumber,
-      total: total,
+      total,
+      total_pages,
+      links: { self, next, prev },
       data: profiles,
     });
   } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-    });
+    res.status(500).json({ status: "error", message: "Internal server error" });
   }
 };
+
+// ── GET /api/profiles/search
 
 const SearchProfiles = async (req, res) => {
   try {
     const { q, page = 1, limit = 10 } = req.query;
-    console.log(q);
+
+    if (!q) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Query parameter q is required" });
+    }
 
     const filter = parseNaturalQuery(q);
 
     if (!filter) {
-      return res.status(400).json({
-        status: "error",
-        message: "Unable to interpret query",
-      });
+      return res
+        .status(400)
+        .json({ status: "error", message: "Unable to interpret query" });
     }
 
-    // pagination
+    const pageNum = Math.max(Number(page), 1);
     const limitNum = Math.min(Number(limit) || 10, 50);
-    const pageNum = Math.max(Number(page) || 1, 1);
     const skip = (pageNum - 1) * limitNum;
 
     const [profiles, total] = await Promise.all([
@@ -285,39 +250,101 @@ const SearchProfiles = async (req, res) => {
       Profile.countDocuments(filter),
     ]);
 
+    const total_pages = Math.ceil(total / limitNum);
+    const base = `/api/profiles/search`;
+    const params = new URLSearchParams(req.query);
+
+    params.set("page", pageNum);
+    const self = `${base}?${params.toString()}`;
+    params.set("page", pageNum + 1);
+    const next = pageNum < total_pages ? `${base}?${params.toString()}` : null;
+    params.set("page", pageNum - 1);
+    const prev = pageNum > 1 ? `${base}?${params.toString()}` : null;
+
     res.status(200).json({
       status: "success",
       page: pageNum,
       limit: limitNum,
       total,
+      total_pages,
+      links: { self, next, prev },
       data: profiles,
     });
   } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-    });
+    res.status(500).json({ status: "error", message: "Internal server error" });
   }
 };
+
+// ── GET /api/profiles/export
+
+const exportProfiles = async (req, res) => {
+  try {
+    const { sort_by, order } = req.query;
+
+    const query = buildQuery(req.query);
+    const sortOption = buildSortOption(sort_by, order) || { created_at: -1 };
+
+    const profiles = await Profile.find(query).sort(sortOption);
+
+    // Build CSV
+    const columns = [
+      "id",
+      "name",
+      "gender",
+      "gender_probability",
+      "age",
+      "age_group",
+      "country_id",
+      "country_name",
+      "country_probability",
+      "created_at",
+    ];
+
+    const header = columns.join(",");
+
+    const rows = profiles.map((p) =>
+      columns
+        .map((col) => {
+          const val = p[col] ?? "";
+          // Wrap in quotes if value contains comma or quote
+          return String(val).includes(",") ? `"${val}"` : val;
+        })
+        .join(","),
+    );
+
+    const csv = [header, ...rows].join("\n");
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="profiles_${timestamp}.csv"`,
+    );
+    res.status(200).send(csv);
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Internal server error" });
+  }
+};
+
+// ── DELETE /api/profiles/:id (admin only)
 
 const deleteProfile = async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!id) {
-      return res.status(400).json({
-        status: "error",
-        message: "Profile ID is required",
-      });
+    if (!isUUID(id)) {
+      return res
+        .status(422)
+        .json({ status: "error", message: "Invalid ID format" });
     }
 
     const deleted = await Profile.findOneAndDelete({ id });
 
-    if (!deleted)
-      return res.status(404).json({
-        status: "error",
-        message: "Profile not found",
-      });
+    if (!deleted) {
+      return res
+        .status(404)
+        .json({ status: "error", message: "Profile not found" });
+    }
 
     return res.status(204).send();
   } catch (error) {
@@ -329,6 +356,7 @@ export {
   CreateProfile,
   getSingleProfile,
   getAllProfiles,
-  deleteProfile,
   SearchProfiles,
+  exportProfiles,
+  deleteProfile,
 };
