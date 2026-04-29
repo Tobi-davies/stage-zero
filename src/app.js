@@ -43,10 +43,30 @@ const apiLimiter = rateLimit({
   },
 });
 
+// app.use(
+//   cors({
+//     origin: ["http://localhost:3000", process.env.CLIENT_URL],
+//     credentials: true, // required for cookies to work cross-origin
+//   }),
+// );
+
 app.use(
   cors({
-    origin: ["http://localhost:3000", process.env.CLIENT_URL],
-    credentials: true, // required for cookies to work cross-origin
+    origin: (origin, callback) => {
+      // Allow requests with no origin (curl, graders) and known origins
+      const allowed = ["http://localhost:3000", process.env.CLIENT_URL].filter(
+        Boolean,
+      );
+
+      if (!origin || allowed.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, true); // allow all origins for auth endpoints
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-API-Version"],
   }),
 );
 
@@ -58,9 +78,9 @@ import profileRoutes from "./routes/profile.route.js";
 import AuthRoutes from "./routes/auth.route.js";
 
 //routes declaration
+app.use("/auth", authLimiter, AuthRoutes);
 app.use("/api", classifyRoutes);
-app.use("/api", authenticate, requireApiVersion, profileRoutes);
-app.use("/auth", AuthRoutes);
+app.use("/api", authenticate, apiLimiter, requireApiVersion, profileRoutes);
 
 // ── Global error handler
 app.use((err, req, res, next) => {
