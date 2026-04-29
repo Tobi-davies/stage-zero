@@ -463,38 +463,61 @@ const refreshTokens = async (req, res) => {
 // };
 
 // ── POST /auth/logout ─────────────────────────────────────────────────────────
+// const logout = async (req, res) => {
+//   const rawRefreshToken = req.body.refresh_token || req.cookies?.refresh_token;
+
+//   if (rawRefreshToken) {
+//     await AuthService.consumeRefreshToken(rawRefreshToken);
+//   }
+
+//   //   res
+//   //     .clearCookie("access_token")
+//   //     .clearCookie("refresh_token")
+//   //     .json({ status: "success", message: "Logged out" });
+//   res
+//     .clearCookie("access_token", {
+//       secure: isProduction,
+//       sameSite: isProduction ? "none" : "lax",
+//     })
+//     .clearCookie("refresh_token", {
+//       secure: isProduction,
+//       sameSite: isProduction ? "none" : "lax",
+//     })
+//     .json({ status: "success", message: "Logged out" });
+// };
 const logout = async (req, res) => {
-  const rawRefreshToken = req.body.refresh_token || req.cookies?.refresh_token;
+  try {
+    const rawRefreshToken =
+      req.body?.refresh_token || req.cookies?.refresh_token;
 
-  if (rawRefreshToken) {
-    await AuthService.consumeRefreshToken(rawRefreshToken);
+    if (rawRefreshToken) {
+      await AuthService.consumeRefreshToken(rawRefreshToken);
+    }
+
+    res
+      .clearCookie("access_token", {
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      })
+      .clearCookie("refresh_token", {
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      })
+      .json({ status: "success", message: "Logged out" });
+  } catch (err) {
+    res.status(500).json({ status: "error", message: "Logout failed" });
   }
-
-  //   res
-  //     .clearCookie("access_token")
-  //     .clearCookie("refresh_token")
-  //     .json({ status: "success", message: "Logged out" });
-  res
-    .clearCookie("access_token", {
-      secure: isProduction,
-      sameSite: isProduction ? "none" : "lax",
-    })
-    .clearCookie("refresh_token", {
-      secure: isProduction,
-      sameSite: isProduction ? "none" : "lax",
-    })
-    .json({ status: "success", message: "Logged out" });
 };
 
 // ── GET /auth/me ──────────────────────────────────────────────────────────────
-export async function getMe(req, res) {
+const getMe = async (req, res) => {
   // req.user is set by auth middleware (next step)
   const { _id, username, email, avatar_url, role, created_at } = req.user;
   res.json({
     status: "success",
     data: { id: _id, username, email, avatar_url, role, created_at },
   });
-}
+};
 
 // ── shared helper ─────────────────────────────────────────────────────────────
 async function exchangeCodeForUser(code, code_verifier) {
@@ -544,4 +567,5 @@ export {
   handleCliCallback,
   refreshTokens,
   logout,
+  getMe,
 };
