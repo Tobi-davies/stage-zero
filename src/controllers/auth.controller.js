@@ -437,24 +437,6 @@ const handleCliCallback = async (req, res) => {
       user = await exchangeCodeForUser(code, code_verifier);
     }
 
-    // if (code === "test_code") {
-    //   // Upsert a seeded admin user
-    //   user = await AuthService.upsertUser({
-    //     github_id: "grader_admin",
-    //     username: "grader_admin",
-    //     email: "grader_admin@insighta.test",
-    //     avatar_url: "",
-    //   });
-    //   // Force admin role
-    //   await User.findByIdAndUpdate(user._id, {
-    //     role: "admin",
-    //     is_active: true,
-    //   });
-    //   user = await User.findById(user._id);
-    // } else {
-    //   user = await exchangeCodeForUser(code, code_verifier);
-    // }
-
     if (!user.is_active) {
       return res
         .status(403)
@@ -470,8 +452,15 @@ const handleCliCallback = async (req, res) => {
 
     res.json({ status: "success", access_token, refresh_token });
   } catch (err) {
-    console.error("CLI callback error:", err.message);
-    res.status(500).json({ status: "error", message: "Authentication failed" });
+    // Log the REAL error
+    console.error("CLI callback error DETAILS:", err.message, err.stack);
+    res
+      .status(500)
+      .json({
+        status: "error",
+        message: "Authentication failed",
+        detail: err.message,
+      });
   }
 };
 
