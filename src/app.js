@@ -78,8 +78,8 @@ app.use(
     exposedHeaders: ["Content-Disposition"],
   }),
 );
-app.options("*", cors()); // handle all preflight requests
-
+// app.options("*", cors()); // handle all preflight requests
+// app.options('(.*)', cors())
 app.use(express.json());
 app.use(cookieParser()); // required to read req.cookies
 
