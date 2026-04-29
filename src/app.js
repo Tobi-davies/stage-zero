@@ -50,25 +50,35 @@ const apiLimiter = rateLimit({
 //   }),
 // );
 
+// app.use(
+//   cors({
+//     origin: (origin, callback) => {
+//       // Allow requests with no origin (curl, graders) and known origins
+//       const allowed = ["http://localhost:3000", process.env.CLIENT_URL].filter(
+//         Boolean,
+//       );
+
+//       if (!origin || allowed.includes(origin)) {
+//         callback(null, true);
+//       } else {
+//         callback(null, true); // allow all origins for auth endpoints
+//       }
+//     },
+//     credentials: true,
+//     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+//     allowedHeaders: ["Content-Type", "Authorization", "X-API-Version"],
+//   }),
+// );
 app.use(
   cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (curl, graders) and known origins
-      const allowed = ["http://localhost:3000", process.env.CLIENT_URL].filter(
-        Boolean,
-      );
-
-      if (!origin || allowed.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(null, true); // allow all origins for auth endpoints
-      }
-    },
+    origin: true, // reflect request origin — allows any origin
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization", "X-API-Version"],
+    exposedHeaders: ["Content-Disposition"],
   }),
 );
+app.options("*", cors()); // handle all preflight requests
 
 app.use(express.json());
 app.use(cookieParser()); // required to read req.cookies
@@ -76,11 +86,13 @@ app.use(cookieParser()); // required to read req.cookies
 import classifyRoutes from "./routes/classify.route.js";
 import profileRoutes from "./routes/profile.route.js";
 import AuthRoutes from "./routes/auth.route.js";
+import userRoutes from "./routes/user.route.js";
 
 //routes declaration
 app.use("/auth", authLimiter, AuthRoutes);
 app.use("/api", classifyRoutes);
 app.use("/api", authenticate, apiLimiter, requireApiVersion, profileRoutes);
+app.use("/api", authenticate, apiLimiter, requireApiVersion, userRoutes);
 
 // ── Global error handler
 app.use((err, req, res, next) => {
