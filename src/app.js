@@ -26,7 +26,23 @@ app.use(
     exposedHeaders: ["Content-Disposition"],
   }),
 );
-app.options("(.*)", cors());
+// app.options("(.*)", cors());
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") {
+    res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET,POST,PUT,DELETE,OPTIONS,PATCH",
+    );
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Content-Type,Authorization,X-API-Version",
+    );
+    res.header("Access-Control-Allow-Credentials", "true");
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 // ── Body + Cookies ────────────────────────────────────────────────────────────
 app.use(express.json());
@@ -43,12 +59,10 @@ const authLimiter = rateLimit({
     return forwarded || ipKeyGenerator(req);
   },
   handler: (req, res) => {
-    res
-      .status(429)
-      .json({
-        status: "error",
-        message: "Too many requests, please try again later",
-      });
+    res.status(429).json({
+      status: "error",
+      message: "Too many requests, please try again later",
+    });
   },
   skip: (req) => req.method === "OPTIONS",
 });
@@ -60,12 +74,10 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => req.user?._id?.toString() || ipKeyGenerator(req),
   handler: (req, res) => {
-    res
-      .status(429)
-      .json({
-        status: "error",
-        message: "Too many requests, please try again later",
-      });
+    res.status(429).json({
+      status: "error",
+      message: "Too many requests, please try again later",
+    });
   },
 });
 
