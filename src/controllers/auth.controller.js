@@ -114,10 +114,12 @@ export const handleGithubCallback = async (req, res) => {
       return res.redirect(`http://localhost:${port}/callback?${params}`);
     }
 
-    return res
-      .cookie("access_token", access_token, cookieOptions(3 * 60 * 1000))
-      .cookie("refresh_token", refresh_token, cookieOptions(5 * 60 * 1000))
-      .redirect(`${process.env.CLIENT_URL}/`);
+    // return res
+    //   .cookie("access_token", access_token, cookieOptions(3 * 60 * 1000))
+    //   .cookie("refresh_token", refresh_token, cookieOptions(5 * 60 * 1000))
+    //   .redirect(`${process.env.CLIENT_URL}/`);
+    const params = new URLSearchParams({ access_token, refresh_token });
+    return res.redirect(`${process.env.CLIENT_URL}?${params}`);
   } catch (err) {
     console.error("Web callback error:", err.message);
     return res
