@@ -5,6 +5,167 @@ import { validate as isUUID } from "uuid";
 import { externalApiError } from "../lib/utils.js";
 import { parseNaturalQuery } from "../utils/naturalLang.js";
 
+import { Readable } from "stream";
+import { parse } from "csv-parse";
+import { invalidateProfileCache } from "../middleware/cache.js";
+
+const BATCH_SIZE = 1000; // rows per bulk insert
+const VALID_GENDERS = ["male", "female"];
+const VALID_GROUPS = ["child", "teenager", "adult", "senior"];
+
+export const importProfiles = async (req, res) => {
+  if (!req.file) {
+    return res
+      .status(400)
+      .json({ status: "error", message: "CSV file required" });
+  }
+
+  const stats = {
+    total_rows: 0,
+    inserted: 0,
+    skipped: 0,
+    reasons: {
+      duplicate_name: 0,
+      invalid_age: 0,
+      missing_fields: 0,
+      invalid_gender: 0,
+      invalid_age_group: 0,
+      malformed_row: 0,
+    },
+  };
+
+  const REQUIRED = ["name", "gender", "age", "age_group", "country_id"];
+  let batch = [];
+
+  const flushBatch = async () => {
+    if (batch.length === 0) return;
+
+    // Get existing names to skip duplicates
+    const names = batch.map((r) => r.name);
+    const existing = await Profile.find(
+      { name: { $in: names } },
+      { name: 1 },
+    ).lean();
+    const existingSet = new Set(existing.map((p) => p.name));
+
+    const toInsert = [];
+    for (const row of batch) {
+      if (existingSet.has(row.name)) {
+        stats.skipped++;
+        stats.reasons.duplicate_name++;
+      } else {
+        toInsert.push(row);
+      }
+    }
+
+    if (toInsert.length > 0) {
+      try {
+        await Profile.insertMany(toInsert, { ordered: false });
+        stats.inserted += toInsert.length;
+      } catch (err) {
+        // ordered: false means partial inserts succeed
+        // Handle duplicate key errors from race conditions
+        if (err.writeErrors) {
+          const dupes = err.writeErrors.length;
+          stats.inserted += toInsert.length - dupes;
+          stats.skipped += dupes;
+          stats.reasons.duplicate_name += dupes;
+        }
+      }
+    }
+
+    batch = [];
+  };
+
+  // Stream the CSV from buffer
+  const stream = Readable.from(req.file.buffer);
+
+  const parser = stream.pipe(
+    parse({
+      columns: true, // use first row as headers
+      skip_empty_lines: true,
+      trim: true,
+      relax_column_count: true,
+    }),
+  );
+
+  try {
+    for await (const row of parser) {
+      stats.total_rows++;
+
+      // Validate required fields
+      const missing = REQUIRED.filter((f) => !row[f] || row[f].trim() === "");
+      if (missing.length > 0) {
+        stats.skipped++;
+        stats.reasons.missing_fields++;
+        continue;
+      }
+
+      // Validate age
+      const age = Number(row.age);
+      if (isNaN(age) || age < 0 || age > 150) {
+        stats.skipped++;
+        stats.reasons.invalid_age++;
+        continue;
+      }
+
+      // Validate gender
+      if (!VALID_GENDERS.includes(row.gender.toLowerCase())) {
+        stats.skipped++;
+        stats.reasons.invalid_gender++;
+        continue;
+      }
+
+      // Validate age_group
+      if (!VALID_GROUPS.includes(row.age_group.toLowerCase())) {
+        stats.skipped++;
+        stats.reasons.invalid_age_group++;
+        continue;
+      }
+
+      batch.push({
+        id: uuidv7(),
+        name: row.name.trim().toLowerCase(),
+        gender: row.gender.toLowerCase(),
+        gender_probability: parseFloat(row.gender_probability) || 0,
+        age,
+        age_group: row.age_group.toLowerCase(),
+        country_id: row.country_id.toUpperCase(),
+        country_name: row.country_name || null,
+        country_probability: parseFloat(row.country_probability) || 0,
+        created_at: new Date(),
+      });
+
+      // Flush batch when it reaches BATCH_SIZE
+      if (batch.length >= BATCH_SIZE) {
+        await flushBatch();
+      }
+    }
+
+    // Flush remaining rows
+    await flushBatch();
+
+    // Invalidate profile caches after bulk insert
+    await invalidateProfileCache();
+
+    res.json({
+      status: "success",
+      total_rows: stats.total_rows,
+      inserted: stats.inserted,
+      skipped: stats.skipped,
+      reasons: stats.reasons,
+    });
+  } catch (err) {
+    console.error("CSV import error:", err.message);
+    // Return partial results if we got some rows in
+    res.status(500).json({
+      status: "error",
+      message: "Import failed midway",
+      partial: stats,
+    });
+  }
+};
+
 // ── helpers
 function buildPaginationLinks(req, page, limit, total) {
   const total_pages = Math.ceil(total / limit);
